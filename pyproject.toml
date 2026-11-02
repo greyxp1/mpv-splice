@@ -3,12 +3,15 @@ requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mpv-smartcut"
+name = "mpv-splice"
 version = "0.1.0"
-description = "Frame-accurate smart cutting backend and mpv frontend"
+description = "Video editing for mpv"
 requires-python = ">=3.12"
-license = "MIT"
+license = "MIT AND LGPL-2.1-only"
 dependencies = ["av>=19,<20"]
 
 [project.scripts]
-mpv-smartcut-backend = "smartcut.__main__:main"
+mpv-splice-backend = "smartcut.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["smartcut*"]

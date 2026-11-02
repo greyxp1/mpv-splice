@@ -1,11 +1,11 @@
+import json
 import os
+import signal
 import shutil
 import sys
 import time
 from fractions import Fraction
 
-from smartcut.media_container import MediaContainer
-from smartcut.smart_cut import smart_cut
 
 class Progress:
     def __init__(self, path: str) -> None:
@@ -27,13 +27,21 @@ class Progress:
 def remove_if_killed(job_path: str) -> int:
     """Fork a watcher that removes the job directory if the backend dies between
     writing b"c" (created) and b"d" (done) to the returned fd."""
+    group = os.getpid()
+    if os.getpgrp() != group:
+        os.setpgrp()
     read_end, write_end = os.pipe()
     if os.fork() == 0:
         os.close(write_end)
+        os.setsid()
         devnull = os.open(os.devnull, os.O_RDWR)
         for fd in (0, 1, 2):
             os.dup2(devnull, fd)
         if os.read(read_end, 1) and not os.read(read_end, 1):
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             shutil.rmtree(job_path, ignore_errors=True)
         os._exit(0)
     os.close(read_end)
@@ -41,7 +49,21 @@ def remove_if_killed(job_path: str) -> int:
 
 
 def main() -> None:
-    input_path, start, end, job_path, final_path = sys.argv[1:]
+    if sys.argv[1:] == ['--capabilities']:
+        from smartcut.export import capabilities
+        print(json.dumps(capabilities()))
+        return
+    if sys.argv[1:] in (['--help'], ['-h']):
+        print('Usage: mpv-splice-backend INPUT START END JOB OUTPUT [EDIT_JSON]\n'
+              '       mpv-splice-backend --capabilities')
+        return
+    if len(sys.argv) not in (6, 7):
+        sys.exit('Expected INPUT START END JOB OUTPUT [EDIT_JSON]')
+    input_path, start, end, job_path, final_path = sys.argv[1:6]
+    settings = json.loads(sys.argv[6]) if len(sys.argv) == 7 else {}
+    selection = (Fraction(start), Fraction(end))
+    if selection[0] < 0 or selection[1] <= selection[0]:
+        sys.exit('Invalid selection')
     # Fork first so a kill right after mkdir is still cleaned up.
     watcher = remove_if_killed(job_path)
     os.mkdir(job_path, 0o700)
@@ -50,9 +72,17 @@ def main() -> None:
     progress_path = os.path.join(job_path, "progress")
     keep = False
     try:
-        selection = (Fraction(start), Fraction(end))
-        with open(output_path, "xb") as output:
-            smart_cut(MediaContainer(input_path, selection), selection, output, Progress(progress_path).emit)
+        from smartcut.export import needs_encoding, export
+        progress = Progress(progress_path).emit
+        if needs_encoding(settings):
+            export(input_path, selection, output_path, settings, progress)
+        else:
+            from smartcut.media_container import MediaContainer
+            from smartcut.smart_cut import smart_cut
+            with open(output_path, "xb") as output:
+                format_name = settings.get('format', 'source')
+                smart_cut(MediaContainer(input_path, selection), selection, output, progress,
+                          None if format_name == 'source' else format_name)
 
         try:
             os.link(output_path, final_path)

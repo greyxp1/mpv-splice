@@ -14,6 +14,7 @@ def smart_cut(
     selection: tuple[Fraction, Fraction],
     output_path: str | BinaryIO,
     progress: Callable[[int, int], None],
+    format: str | None = None,
 ) -> None:
     # Selections touching either end of the file keep everything past it.
     epsilon, duration = Fraction(1, 1_000_000), media_container.duration
@@ -22,8 +23,8 @@ def smart_cut(
     # A shared origin keeps the delays between streams.
     origin = max(start, media_container.start_time)
     total = max(1, int((selection[1] - selection[0]) * 1_000_000))
-    with av.open(output_path, 'w') as output:
-        output.metadata['ENCODED_BY'] = 'mpv-smartcut 0.1.0'
+    with av.open(output_path, 'w', format=format) as output:
+        output.metadata['ENCODED_BY'] = 'mpv-splice 0.1.0'
         if output.format.name in ('matroska', 'webm'):
             for stream in media_container.av_container.streams:
                 if stream.type == 'attachment':
