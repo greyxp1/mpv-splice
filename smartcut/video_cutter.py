@@ -237,6 +237,8 @@ class VideoCutter:
             self.enc_offset = None
             pix_fmt = self.out_stream.codec_context.pix_fmt
             nvenc_pix_fmt = NVENC_PIX_FMTS.get(pix_fmt)
+            if self.codec_name == 'hevc' and pix_fmt == 'yuv444p':
+                nvenc_pix_fmt = pix_fmt
             if self.nvenc_options is not None and nvenc_pix_fmt is not None:
                 try:
                     self.enc_codec = self._create_encoder(f'{self.codec_name}_nvenc', self.nvenc_options, nvenc_pix_fmt)
