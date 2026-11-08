@@ -49,17 +49,21 @@ local function clear_thumbnail()
     if thumb_request then send({"script-message-to", "thumbfast", "clear"}) end
     thumb_request = nil
 end
-local function bar_height() return chapter >= 0 and chapters[chapter + 1] and 130 or 108 end
+local bar_height = 86
+local function over_controls(x, y)
+    return y >= H - bar_height or x >= 25 and x <= W - 25 and y >= 20 and y <= (chapter >= 0 and 74 or 50)
+end
 local function enabled() return not console and not (edits.enabled == false and #edits.controls > 0) end
 local function visible() return enabled() and duration > 0 and visibility ~= "never" and (visibility == "always" or shown or drag ~= nil) end
 local function input(enabled_now)
     if enabled_now == click_enabled then return end
     click_enabled = enabled_now
-    if enabled_now then mp.enable_key_bindings("splice-input") else mp.disable_key_bindings("splice-input") end
+    for _, section in ipairs({"splice-input", "splice-heading"}) do
+        if enabled_now then mp.enable_key_bindings(section) else mp.disable_key_bindings(section) end
+    end
 end
 local hide_timer = mp.add_timeout(1.5, function()
-    local _, y = mouse()
-    if not inside or y < H - bar_height() then shown = false end
+    if not inside or not over_controls(mouse()) then shown = false end
     request()
 end)
 hide_timer:kill()
@@ -109,10 +113,11 @@ local function layout()
     local speed_left, speed_right = 25 + reserve + 20, x + 12
     local height = 32 * 1.3
     local width = math.min(height * 3.5, speed_right - speed_left)
-    speed_box = width >= height * 2 and add_region("speed", clamp(W / 2 - width / 2, speed_left, speed_right - width), row - height / 2, width, height) or nil
-    add_region("title", 25, H - (chapter >= 0 and 126 or 106), math.max(0, W - 50), 30)
-    if chapter >= 0 then add_region("chapter", 25, H - 96, math.max(0, W - 50), 22) end
-    mp.set_mouse_area(0, H - bar_height(), W, H, "splice-input")
+    speed_box = width >= height * 2 and add_region("speed", clamp(W / 2 - width / 2, speed_left, speed_right - width), row - height / 2 - 14, width, height) or nil
+    add_region("title", 25, 20, math.max(0, W - 50), 30)
+    if chapter >= 0 then add_region("chapter", 25, 52, math.max(0, W - 50), 22) end
+    mp.set_mouse_area(0, H - bar_height, W, H, "splice-input")
+    mp.set_mouse_area(25, 20, W - 25, chapter >= 0 and 74 or 50, "splice-heading")
 end
 local function target_at(x, y)
     for i = #regions, 1, -1 do if hit(regions[i], x, y) then return regions[i] end end
@@ -237,7 +242,7 @@ render = function()
     opacity = target > opacity and math.min(target, opacity + dt / 0.16) or math.max(target, opacity - dt / 0.16)
     if opacity ~= target then request() end
     input(target > 0)
-    local margin = target > 0 and bar_height() / math.max(H, 1) or 0
+    local margin = target > 0 and bar_height / math.max(H, 1) or 0
     if published_margin ~= margin then
         published_margin = margin
         mp.set_property_native("user-data/osc/margins", {l = 0, r = 0, t = 0, b = margin})
@@ -282,8 +287,8 @@ render = function()
     end
     -- A short gradient avoids the large blurred shapes inherited from ModernZ.
     for i = 0, 31 do
-        local top = H - bar_height() + math.floor(i * bar_height() / 32)
-        local bottom = H - bar_height() + math.floor((i + 1) * bar_height() / 32)
+        local top = H - bar_height + math.floor(i * bar_height / 32)
+        local bottom = H - bar_height + math.floor((i + 1) * bar_height / 32)
         box(0, top, W, bottom - top, "000000", i / 31 * 0.7)
     end
     local function bar(left, right, color, alpha)
@@ -317,8 +322,8 @@ render = function()
     box(knob - 7, H - 21, 14, 14, accent, 1, 7)
     box(knob - 4, H - 18, 8, 8, handle, 1, 4)
     local chapter_entry = chapters[chapter + 1]
-    text(title, 25, H - (chapter_entry and 110 or 90), 24, white, 4, 1, true)
-    if chapter_entry then text(chapter_entry.title or "", 25, H - 85, 16, white, 4, 1, true) end
+    text(title, 25, 35, 24, white, 4, 1, true)
+    if chapter_entry then text(chapter_entry.title or "", 25, 63, 16, white, 4, 1, true) end
     for _, region in ipairs(regions) do
         local color = region.control and region.control.active and accent or white
         local hovered = hover == region
@@ -366,7 +371,7 @@ render = function()
             ass:draw_stop()
         end
         local offset = (label_height - b.h) / 2
-        event(white, 1, cx, H - 44 + offset * amount, 5)
+        event(white, 1, cx, b.y + b.h / 2 + offset * amount, 5)
         ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, 17 + (size - 17) * amount, math.floor(speed * 100 + 0.5) / 100))
     end
     if hover and hover.id == "seek" then
@@ -417,21 +422,24 @@ ui.update = function(value)
     layout()
     request()
 end
-mp.set_key_bindings({
+local click_bindings = {
     {"MBTN_LEFT", release, press},
     {"Shift+MBTN_LEFT", release, press},
     {"MBTN_RIGHT", secondary},
     {"MBTN_LEFT_DBL", function() end},
     {"WHEEL_UP", function() wheel(1) end},
     {"WHEEL_DOWN", function() wheel(-1) end},
-}, "splice-input", "force")
-mp.disable_key_bindings("splice-input")
+}
+for _, section in ipairs({"splice-input", "splice-heading"}) do
+    mp.set_key_bindings(click_bindings, section, "force")
+    mp.disable_key_bindings(section)
+end
 mp.observe_property("mouse-pos", "native", function(_, value)
     if not value then return end
     pointer = value
     inside = value.hover
     if inside then
-        if value.y >= H - bar_height() then show() elseif visibility == "auto" and not drag then shown = false end
+        if over_controls(value.x, value.y) then show() elseif visibility == "auto" and not drag then shown = false end
     else release() shown = false end
     request()
 end)
