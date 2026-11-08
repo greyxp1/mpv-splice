@@ -90,6 +90,7 @@ local function layout()
     regions = {}
     add_region("seek", 15, H - 23, W - 30, 18)
     local x, row = W - 37, H - 44
+    if W >= 600 then add_region("menu", x - 12, row - 12, 24, 24) x = x - 45 end
     for i = #edits.controls, 1, -1 do
         local control = edits.controls[i]
         if not control.range then
@@ -97,7 +98,6 @@ local function layout()
             x = x - 45
         end
     end
-    if W >= 600 then add_region("menu", x - 12, row - 12, 24, 24) x = x - 45 end
     local left = 25
     local reserve = math.max(292, #(clock(duration, true) .. clock(duration, true)) * 9 + 40)
     local fields = false
@@ -343,37 +343,35 @@ render = function()
         local spacing = b.w / 11
         local size = math.floor(b.h * 0.48 + 0.5)
         local label_height = math.floor(size * 1.1 + 0.5)
-        if amount > 0 then
-            box(b.x, b.y, b.w, b.h, "000000", 0.6 * amount, 4)
-            local current = drag and drag.kind == "speed" and drag.value or speed
-            local nearest = math.floor(current * 10 + 0.5)
-            local guide = math.floor(b.h / 7.5)
-            local bottom = b.y + b.h - guide
-            local top = b.y + label_height
-            for i = -5, 5 do
-                local notch = nearest + i
-                local x = cx + (notch - current * 10) * spacing
-                if notch >= 0 and notch <= 1000 then
-                    local y = top + (bottom - top) * (notch % 10 == 0 and 0 or notch % 5 == 0 and 0.2 or 0.4)
-                    local width = notch % 10 == 0 and 3 or 2
-                    event(white, math.min(1, 1.2 - math.abs(x - cx) / (b.w / 2)) * amount)
-                    ass:append("{\\bord1\\3c&H000000&}")
-                    ass:draw_start()
-                    ass:rect_cw(x - width / 2, y, x + width / 2, bottom)
-                    ass:draw_stop()
-                end
+        local emphasis = 0.45 + 0.55 * amount
+        box(b.x, b.y, b.w, b.h, "000000", 0.6 * amount, 4)
+        local current = drag and drag.kind == "speed" and drag.value or speed
+        local nearest = math.floor(current * 10 + 0.5)
+        local guide = math.floor(b.h / 7.5)
+        local bottom = b.y + b.h - guide
+        local top = b.y + label_height
+        for i = -5, 5 do
+            local notch = nearest + i
+            local x = cx + (notch - current * 10) * spacing
+            if notch >= 0 and notch <= 1000 then
+                local y = top + (bottom - top) * (notch % 10 == 0 and 0 or notch % 5 == 0 and 0.2 or 0.4)
+                local width = notch % 10 == 0 and 3 or 2
+                event(white, math.min(1, 1.2 - math.abs(x - cx) / (b.w / 2)) * emphasis)
+                ass:append("{\\bord1\\3c&H000000&}")
+                ass:draw_start()
+                ass:rect_cw(x - width / 2, y, x + width / 2, bottom)
+                ass:draw_stop()
             end
-            event(white, amount)
-            ass:append("{\\bord1\\3c&H000000&}")
-            ass:draw_start()
-            ass:move_to(cx, b.y + b.h - 2 - guide)
-            ass:line_to(cx + guide, b.y + b.h - 2)
-            ass:line_to(cx - guide, b.y + b.h - 2)
-            ass:draw_stop()
         end
-        local offset = (label_height - b.h) / 2
-        event(white, 1, cx, H - 44 + (offset - 14) * amount, 5)
-        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, 17 + (size - 17) * amount, math.floor(speed * 100 + 0.5) / 100))
+        event(white, emphasis)
+        ass:append("{\\bord1\\3c&H000000&}")
+        ass:draw_start()
+        ass:move_to(cx, b.y + b.h - 2 - guide)
+        ass:line_to(cx + guide, b.y + b.h - 2)
+        ass:line_to(cx - guide, b.y + b.h - 2)
+        ass:draw_stop()
+        event(white, amount, cx, b.y + label_height / 2, 5)
+        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, size, math.floor(speed * 100 + 0.5) / 100))
     end
     if hover and hover.id == "seek" then
         local value = time_at(mx)
