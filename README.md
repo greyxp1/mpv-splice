@@ -12,16 +12,16 @@ Copy the `mpv-splice` directory to mpv's `scripts` directory and put
 The plugin includes its ModernZ-derived interface and replaces other OSC scripts.
 The Nix package points to its backend and can go straight into mpv's script list.
 
-Use Trim (scissors) to show the seekbar handles. Press `i` and `o` to mark the
-range, or click its timestamps to enter it. Export opens format settings and
-the save action. Escape dismisses the active tool while keeping its edits.
-Exports keep the source file untouched. Press `C` to cancel an export.
+Press `e` to toggle editing with trim handles and a crop rectangle. Press `i`
+and `o` to mark the range, or click its timestamps to enter it. The three-dot
+menu opens Export settings or playback controls. Enter, Escape or `e` leaves
+editing while keeping the edits. Exports keep the source file untouched.
+Press `C` to cancel an export.
 
-Use Crop to adjust the crop rectangle. The preview dims the excluded area
-without changing the video framing. Drag its edges or corners to resize,
-or drag inside to move it. Arrow keys move one pixel and Shift-arrows resize.
-Hold Ctrl for ten-pixel steps. Shift-drag draws a new rectangle. Enter or Escape
-applies the crop.
+Drag the crop rectangle's edges or corners to resize, or drag inside to move
+it. Arrow keys move one pixel and Shift-arrows resize. Hold Ctrl for ten-pixel
+steps. Shift-drag draws a new rectangle. The preview dims the excluded area
+without changing the video framing.
 
 Original quality keeps the source codec and colour detail. Cropping, resizing
 and conversion re-encode the selected range and can lose quality.

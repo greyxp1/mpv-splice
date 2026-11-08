@@ -13,7 +13,7 @@ options.read_options(opts, "mpv-splice")
 
 local task, started, progress_path, percent
 local job_serial = 0
-local trimming, prompting, cropping = false, false, false
+local editing, prompting = false, false
 local first, last, crop, settings, output_name, message
 local capabilities, loading
 local saved, drag, edge_capture = {}, nil, false
@@ -178,7 +178,7 @@ end
 
 cancel = function()
     if task then mp.abort_async_command(task)
-    elseif trimming or cropping then dismiss() end
+    elseif editing then dismiss() end
 end
 
 local function set_time(which)
@@ -198,19 +198,19 @@ end
 
 reset = function()
     first, last, crop = 0, mp.get_property_number("duration", 0), nil
-    trimming, cropping, message, drag = false, false, nil, nil
+    editing, message, drag = false, nil, nil
     bindings()
     settings = {profile = "original", label = "Original quality", format = "source", video = "source", audio = "copy", quality = "high"}
     output_name = choose_output(settings.format)
     draw()
 end
 
-local function crop_mode(next_trim)
+local function edit_mode()
     local width, height, rotation = source_size()
     if width == 0 then notify("No video to crop") return end
     if rotation % 90 ~= 0 then notify("Crop requires rotation in 90° steps") return end
-    cropping, trimming, drag = not cropping, next_trim or false, nil
-    if cropping then
+    editing, drag = not editing, nil
+    if editing then
         crop = crop and {unpack(crop)} or {0, 0, width, height}
     elseif crop[1] == 0 and crop[2] == 0 and crop[3] == width and crop[4] == height then
         crop = nil
@@ -225,8 +225,10 @@ local function export_edits()
     end
     local edits = {}
     for key, value in pairs(settings) do edits[key] = value end
-    edits.crop = crop
     edits.source_width, edits.source_height, edits.rotation = source_size()
+    if crop and (crop[1] ~= 0 or crop[2] ~= 0 or crop[3] ~= edits.source_width or crop[4] ~= edits.source_height) then
+        edits.crop = crop
+    end
     start_export(first, last, edits, output_name)
 end
 
@@ -317,24 +319,27 @@ local function move()
         if drag.mode:find("s") then b = clamp(cy, t + 2, sh) end
         crop = {l, t, r - l, b - t}
     end
-    draw()
+    draw(true)
 end
 
 local function mouse(event)
     if event.event == "up" then
         if drag then move() end
         drag = nil
+        ui.release()
         draw()
         return
     end
-    if event.event ~= "down" or prompting or not cropping then return end
+    if event.event ~= "down" or prompting or not editing then return end
     local x, y = mouse_position()
+    local w, h = mp.get_osd_size()
+    if ui.hit_test(x * w / W, y * h / H) then ui.press() return end
     local cx, cy = crop_point(x, y)
     drag = {mode = event.new and "new" or crop_target(x, y), x = cx, y = cy, crop = {unpack(crop)}}
 end
 
 local function nudge(dx, dy, resize)
-    if not cropping or drag then return end
+    if not editing or drag then return end
     local sw, sh = source_size()
     if resize then
         crop[3], crop[4] = clamp(crop[3] + dx, 2, sw - crop[1]), clamp(crop[4] + dy, 2, sh - crop[2])
@@ -353,36 +358,23 @@ layout = function()
 end
 
 dismiss = function()
-    trimming = false
-    if cropping then crop_mode() else bindings() draw() end
+    if editing then edit_mode() end
 end
 
-local function trim_tool()
-    if cropping then crop_mode(true) return end
-    trimming = not trimming
-    bindings()
-    draw()
-end
-
-draw = function()
-    local selected = settings and (first > 0 or last < mp.get_property_number("duration", 0))
-    local controls = settings and {
-        {id = "trim", icon = "trim", active = trimming or selected, tooltip = "Trim"},
-        {id = "crop", icon = "crop", active = cropping or crop ~= nil,
-            tooltip = cropping and "Apply crop" or "Crop"},
-        {id = "export", icon = task and "downloading" or "download",
-            tooltip = task and string.format("Cancel export · %d%%", percent or 0) or "Export"},
-    } or {}
-    if trimming then
-        controls[#controls + 1] = {id = "in", text = "In ", range = "a", width = 140, tooltip = "In point · i marks the playhead"}
-        controls[#controls + 1] = {id = "out", text = "Out ", range = "b", width = 140, tooltip = "Out point · o marks the playhead"}
+draw = function(crop_only)
+    if not crop_only then
+        local selected = settings and (first > 0 or last < mp.get_property_number("duration", 0))
+        local controls = editing and {
+            {id = "in", text = "In ", range = "a"},
+            {id = "out", text = "Out ", range = "b"},
+        } or {}
+        ui.update({
+            enabled = not prompting,
+            range = (editing or selected) and {a = first, b = last, handles = editing} or nil,
+            controls = controls,
+        })
     end
-    ui.update({
-        enabled = settings ~= nil and not prompting,
-        range = (trimming or selected) and {a = first, b = last, handles = trimming} or nil,
-        controls = controls,
-    })
-    if not cropping or prompting then handles_overlay:remove() end
+    if not editing or prompting then handles_overlay:remove() end
     if task then
         overlay.res_x, overlay.res_y = 0, 0
         overlay.data = "{\\an8\\fs22\\bord2}" .. string.format("Exporting · %d%% · %ds · %s cancel", percent or 0,
@@ -408,7 +400,7 @@ draw = function()
     box(vx, b, vw, vy + vh - b, "000000", "60")
     box(vx, t, l - vx, b - t, "000000", "60")
     box(r, t, vx + vw - r, b - t, "000000", "60")
-    if cropping and not prompting then
+    if editing and not prompting then
         box(l, t, r - l, 2, fg) box(l, b - 2, r - l, 2, fg)
         box(l, t, 2, b - t, fg) box(r - 2, t, 2, b - t, fg)
     end
@@ -417,7 +409,7 @@ draw = function()
     local capture = drag ~= nil
     overlay.res_x, overlay.res_y, overlay.data = W, H, a.text
     overlay:update()
-    if not cropping or prompting then return end
+    if not editing or prompting then return end
     local mx, my = mouse_position()
     local target = drag and drag.mode or crop_target(mx, my)
     a = assdraw.ass_new()
@@ -428,14 +420,13 @@ draw = function()
     end
     handles_overlay.res_x, handles_overlay.res_y, handles_overlay.data = W, H, a.text
     handles_overlay:update()
-    -- Edge handles remain draggable where the OSC also accepts mouse input.
+    local w, h = mp.get_osd_size()
     if capture ~= edge_capture then
         edge_capture = capture
         if capture then mp.enable_key_bindings("editor-crop-edge")
         else mp.disable_key_bindings("editor-crop-edge") end
     end
     local osc = mp.get_property_native("user-data/osc/margins") or {}
-    local w, h = mp.get_osd_size()
     mp.set_mouse_area(0, 0, w, h * (1 - (osc.b or 0)), "editor-crop")
     mp.set_mouse_area(0, 0, w, h, "editor-crop-edge")
 end
@@ -445,20 +436,17 @@ bindings = function()
         mp.disable_key_bindings(section)
     end
     edge_capture = false
-    local active = trimming or cropping
-    if active and not saved.visibility then
+    if editing and not saved.visibility then
         saved.visibility = mp.get_property_native("user-data/osc/visibility")
         if saved.visibility then mp.commandv("script-message", "osc-visibility", "always", "no-osd") end
-    elseif not active and saved.visibility then
+    elseif not editing and saved.visibility then
         mp.commandv("script-message", "osc-visibility", saved.visibility, "no-osd")
         saved.visibility = nil
     end
-    if active and not prompting then
+    if editing and not prompting then
         mp.enable_key_bindings("editor-keys")
-        if cropping then
-            mp.enable_key_bindings("editor-crop")
-            mp.enable_key_bindings("editor-crop-keys")
-        end
+        mp.enable_key_bindings("editor-crop")
+        mp.enable_key_bindings("editor-crop-keys")
     end
 end
 
@@ -487,19 +475,20 @@ end
 mp.set_key_bindings(crop_keys, "editor-crop-keys", "force")
 mp.set_key_bindings({
     {"ESC", dismiss},
-    {"ENTER", function() if cropping then crop_mode() else export_edits() end end},
+    {"ENTER", dismiss},
     {"i", function() mark_point("first") end},
     {"o", function() mark_point("last") end},
 }, "editor-keys", "force")
+mp.add_forced_key_binding("e", "mpv-splice-edit", function() if settings and not prompting then edit_mode() end end)
 mp.add_forced_key_binding(opts.cancel_key, "mpv-splice-cancel", function() if not prompting then cancel() end end)
 mp.observe_property("osd-dimensions", "native", layout)
 mp.observe_property("user-data/osc/margins", "native", layout)
 mp.observe_property("mouse-pos", "native", function()
-    if cropping and not prompting then if drag then move() else draw() end end
+    if editing and not prompting then if drag then move() else draw(true) end end
 end)
 mp.register_event("start-file", function()
     if prompting then input.terminate() end
-    trimming, cropping, drag = false, false, nil
+    editing, drag = false, nil
     bindings()
     settings, first, last, crop = nil, nil, nil, nil
     draw()
@@ -511,12 +500,18 @@ mp.register_event("file-loaded", function()
 end)
 
 ui.action = function(id, value)
-    if not settings or prompting then return end
-    if id == "trim" then trim_tool()
-    elseif id == "in" then set_time("first")
+    if prompting then return end
+    if id == "menu" then
+        if not settings then mp.command("script-binding select/menu") return end
+        select_value("", {
+            {label = task and "Cancel export" or "Export", action = function() if task then cancel() else export_menu() end end},
+            {label = "Playback", action = function() mp.command("script-binding select/menu") end},
+        }, nil, function(entry) entry.action() end)
+        return
+    end
+    if not settings then return end
+    if id == "in" then set_time("first")
     elseif id == "out" then set_time("last")
-    elseif id == "crop" then crop_mode()
-    elseif id == "export" then if task then cancel() else export_menu() end
     elseif id == "range-end" then draw()
     elseif id == "range-a" or id == "range-b" then
         local time = tonumber(value)

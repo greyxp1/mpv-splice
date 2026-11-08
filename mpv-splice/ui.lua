@@ -19,13 +19,6 @@ local thumbnail, thumb_request = {}, nil
 local request, render
 local interval, font, published_margin = 1 / 60, "sans-serif", nil
 local white, accent, handle = "FFFFFF", "3282FF", "0865C9"
-local paths = {
-    trim = "m 2 5 b 2 1 8 1 8 5 b 8 9 2 9 2 5 m 4 5 b 4 6.5 6 6.5 6 5 b 6 3.5 4 3.5 4 5 m 2 19 b 2 15 8 15 8 19 b 8 23 2 23 2 19 m 4 19 b 4 20.5 6 20.5 6 19 b 6 17.5 4 17.5 4 19 m 6 7 l 8 6 22 21 19 21 m 6 17 l 8 18 22 3 19 3",
-    crop = "m 5 1 l 7 1 7 17 23 17 23 19 5 19 m 1 5 l 19 5 19 23 17 23 17 7 1 7",
-    download = "m 11 2 l 13 2 13 14 18 9 20 11 12 19 4 11 6 9 11 14 m 2 21 l 22 21 22 23 2 23",
-    downloading = "m 4 3 l 12 11 20 3 22 5 14 13 22 21 20 23 12 15 4 23 2 21 10 13 2 5",
-}
-
 local function send(command) mp.command_native_async(command, function() end) end
 local function clamp(value, low, high) return math.max(low, math.min(high, value)) end
 local pointer = {x = 0, y = 0}
@@ -53,7 +46,7 @@ local bar_height = 86
 local function over_controls(x, y)
     return y >= H - bar_height or x >= 25 and x <= W - 25 and y >= 20 and y <= (chapter >= 0 and 74 or 50)
 end
-local function enabled() return not console and not (edits.enabled == false and #edits.controls > 0) end
+local function enabled() return not console and edits.enabled ~= false end
 local function visible() return enabled() and duration > 0 and visibility ~= "never" and (visibility == "always" or shown or drag ~= nil) end
 local function input(enabled_now)
     if enabled_now == click_enabled then return end
@@ -89,28 +82,20 @@ local function layout()
     if width > 0 and height > 0 then W, H = width, height end
     regions = {}
     add_region("seek", 15, H - 23, W - 30, 18)
-    local x, row = W - 37, H - 44
-    if W >= 600 then add_region("menu", x - 12, row - 12, 24, 24) x = x - 45 end
-    for i = #edits.controls, 1, -1 do
-        local control = edits.controls[i]
-        if not control.range then
-            add_region(control.id, x - 12, row - 12, 24, 24, control)
-            x = x - 45
-        end
-    end
+    local row = H - 44
+    add_region("menu", W - 49, row - 12, 24, 24)
     local left = 25
-    local reserve = math.max(292, #(clock(duration, true) .. clock(duration, true)) * 9 + 40)
-    local fields = false
     for _, control in ipairs(edits.controls) do
-        if control.range then
-            fields = true
-            local width = math.max(140, #control_text(control) * 8 + 8)
-            add_region(control.id, left, row - 12, width, 24, control)
-            left = left + width + 12
-        end
+        local width = math.max(140, #control_text(control) * 8 + 8)
+        add_region(control.id, left, row - 12, width, 24, control)
+        left = left + width + 12
     end
-    if not fields then add_region("time", 25, row - 12, #(clock(duration, true) .. clock(duration, true)) * 9 + 24, 24) end
-    local speed_left, speed_right = 25 + reserve + 20, x + 12
+    local time_width = #(clock(duration, true) .. clock(duration, true)) * 9 + 24
+    local time_left = W - 72 - time_width
+    if #edits.controls == 0 or time_left >= left + 12 then
+        add_region("time", time_left, row - 12, time_width, 24)
+    end
+    local speed_left, speed_right = left + 20, time_left - 20
     local height = 32 * 1.3
     local width = math.min(height * 3.5, speed_right - speed_left)
     speed_box = width >= height * 2 and {x = clamp(W / 2 - width / 2, speed_left, speed_right - width), y = row - height / 2 - 8, w = width, h = height} or nil
@@ -173,7 +158,7 @@ local function release()
         if hit(held.box, x, y) then
             local id = held.box.id
             if held.box.control then action(id)
-            elseif id == "menu" then mp.command("script-binding select/menu")
+            elseif id == "menu" then action("menu")
             elseif id == "time" then remaining = not remaining
             elseif id == "title" then mp.command("script-binding stats/display-page-5")
             elseif id == "chapter" then mp.command("script-binding select/select-chapter") end
@@ -216,7 +201,7 @@ local function secondary()
         if nearest then seek(nearest, true) end
     elseif box.id == "title" then mp.command("script-binding select/select-watch-history")
     elseif box.id == "chapter" then mp.commandv("show-text", "${chapter-list}", 3000)
-    elseif box.id == "menu" then mp.command("script-binding select/menu") end
+    elseif box.id == "menu" then action("menu") end
     request()
 end
 local function wheel(direction)
@@ -278,14 +263,6 @@ render = function()
         if clip then ass:append(string.format("{\\clip(25,0,%d,%d)}", W - 25, H)) end
         ass:append((tostring(value):gsub("\\", "\\\226\129\160"):gsub("{", "\\{"):gsub("\n", "\\N"):gsub("^ ", "\\h"):gsub("\\N ", "\\N\\h")))
     end
-    local function icon(name, x, y, color)
-        if name == "menu" then
-            for offset = -6, 6, 6 do box(x - 1.5, y + offset - 1.5, 3, 3, color, 1, 1.5) end
-        elseif paths[name] then
-            event(color, 1, x - 12, y - 12)
-            ass:append("{\\p1}" .. paths[name] .. "{\\p0}")
-        end
-    end
     local function bar(left, right, color, alpha)
         local start = left
         for _, entry in ipairs(chapters) do
@@ -320,14 +297,15 @@ render = function()
     text(title, 25, 35, 24, white, 4, 1, true)
     if chapter_entry then text(chapter_entry.title or "", 25, 63, 16, white, 4, 1, true) end
     for _, region in ipairs(regions) do
-        local color = region.control and region.control.active and accent or white
         local hovered = hover == region
-        if region.control and not region.control.range or region.id == "menu" then
-            icon(region.control and region.control.icon or "menu", region.x + region.w / 2, H - 44, hovered and accent or color)
-        elseif region.control and region.control.range then
+        if region.id == "menu" then
+            for offset = -6, 6, 6 do
+                box(region.x + region.w / 2 - 1.5, H - 44 + offset - 1.5, 3, 3, hovered and accent or white, 1, 1.5)
+            end
+        elseif region.control then
             text(control_text(region.control), region.x, H - 44, 16, hovered and accent or white)
         elseif region.id == "time" then
-            text((remaining and "−" or "") .. clock(remaining and duration - position or position, milliseconds) .. " / " .. clock(duration, milliseconds), 25, H - 44, 16)
+            text((remaining and "−" or "") .. clock(remaining and duration - position or position, milliseconds) .. " / " .. clock(duration, milliseconds), region.x + region.w, H - 44, 16, white, 6)
         end
     end
     if speed_box then
@@ -392,16 +370,7 @@ render = function()
             box(tx - label_width / 2, top - 23, label_width, 23, "111111", 0.95, 5)
             text(label, tx, top - 12, 14, white, 5)
         end
-    else
-        clear_thumbnail()
-        if hover and hover.control and hover.control.tooltip then
-            local label = hover.control.tooltip
-            local width = #label * 7 + 18
-            local x = clamp(hover.x + hover.w / 2, width / 2 + 10, W - width / 2 - 10)
-            box(x - width / 2, H - 92, width, 24, "111111", 0.95, 5)
-            text(label, x, H - 80, 14, white, 5)
-        end
-    end
+    else clear_thumbnail() end
     overlay.res_x, overlay.res_y = W, H
     if overlay.data ~= ass.text then overlay.data = ass.text
         send({name = "osd-overlay", id = overlay.id, format = overlay.format, data = ass.text, res_x = W, res_y = H, z = overlay.z}) end
@@ -409,6 +378,7 @@ render = function()
     if preview_seek then local value = preview_seek preview_seek = nil seek(value, false) end
 end
 
+ui.press, ui.release, ui.hit_test = press, release, target_at
 ui.update = function(value)
     if drag and (value.enabled == false or (drag.kind == "a" or drag.kind == "b") and not (value.range and value.range.handles)) then stop_drag(true) end
     edits = value
@@ -417,7 +387,6 @@ ui.update = function(value)
 end
 local click_bindings = {
     {"MBTN_LEFT", release, press},
-    {"Shift+MBTN_LEFT", release, press},
     {"MBTN_RIGHT", secondary},
     {"MBTN_LEFT_DBL", function() end},
     {"WHEEL_UP", function() wheel(1) end},
@@ -463,7 +432,7 @@ observe("seeking", function(value) if value == false then pending_seek = nil end
 observe("user-data/mpv/console/open", function(value) console = value == true end)
 mp.observe_property("pause", "bool", function(_, paused) if paused then show() end end)
 mp.register_event("seek", show)
-mp.register_event("file-loaded", show)
+mp.register_event("file-loaded", function() set_visibility(visibility) end)
 mp.register_event("start-file", function() stop_drag(false) pending_seek = nil clear_thumbnail() end)
 mp.register_event("shutdown", function() clear_thumbnail() mp.del_property("user-data/osc") end)
 mp.set_property("osc", "no")
