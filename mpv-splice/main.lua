@@ -499,14 +499,46 @@ mp.register_event("file-loaded", function()
     reset()
 end)
 
+-- Playback entries follow mpv contributors’ select.lua menu (LGPL-2.1-or-later).
+local function player_menu()
+    local counts, text_sub = {sub = 0, audio = 0, video = 0}, false
+    for _, track in ipairs(mp.get_property_native("track-list", {})) do
+        if counts[track.type] then counts[track.type] = counts[track.type] + 1 end
+        if track.type == "sub" and track["main-selection"] == 0 and track.codec ~= "dvd_subtitle" and track.codec ~= "hdmv_pgs_subtitle" then
+            text_sub = true
+        end
+    end
+    local entries = {{label = task and "Cancel export" or "Export",
+        action = function() if task then cancel() else export_menu() end end}}
+    local function add(label, binding, available)
+        if available == false then return end
+        entries[#entries + 1] = {label = label, action = function() mp.commandv("script-binding", binding) end}
+    end
+    add("Subtitles", "select/select-sid", counts.sub > 0)
+    add("Secondary subtitles", "select/select-secondary-sid", counts.sub > 1)
+    add("Subtitle lines", "select/select-subtitle-line", text_sub)
+    add("Audio tracks", "select/select-aid", counts.audio > 1)
+    add("Video tracks", "select/select-vid", counts.video > 1)
+    add("Playlist", "select/select-playlist", mp.get_property_number("playlist-count", 0) > 1)
+    add("Chapters", "select/select-chapter", #mp.get_property_native("chapter-list", {}) > 0)
+    add(mp.get_property("current-demuxer") == "disc" and "Titles" or "Editions", "select/select-edition", mp.get_property_number("edition-list/count", 0) > 1)
+    add("Audio devices", "select/select-audio-device", counts.audio > 0)
+    add("Key bindings", "select/select-binding")
+    add("History", "select/select-watch-history")
+    add("Watch later", "select/select-watch-later")
+    add("Playback statistics", "stats/display-page-1-toggle")
+    add("File information", "stats/display-page-5-toggle")
+    add("Edit config file", "select/edit-config-file")
+    add("Edit key bindings", "select/edit-input-conf")
+    add("Help", "stats/display-page-4-toggle")
+    add("Online documentation", "select/open-docs")
+    select_value("", entries, nil, function(entry) entry.action() end)
+end
+
 ui.action = function(id, value)
     if prompting then return end
     if id == "menu" then
-        if not settings then mp.command("script-binding select/menu") return end
-        select_value("", {
-            {label = task and "Cancel export" or "Export", action = function() if task then cancel() else export_menu() end end},
-            {label = "Playback", action = function() mp.command("script-binding select/menu") end},
-        }, nil, function(entry) entry.action() end)
+        if settings then player_menu() else mp.command("script-binding select/menu") end
         return
     end
     if not settings then return end
