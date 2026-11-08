@@ -12,11 +12,12 @@ local W, H, duration, position, speed = 1280, 720, 0, 0, 1
 local chapters, chapter, title = {}, -1, ""
 local visibility, shown, console, inside = "auto", false, false, false
 local opacity, ruler, last_frame = 0, 0, mp.get_time()
-local drag, pending_seek, hover, click_enabled
+local drag, pending_seek, preview_seek, hover, click_enabled
 local regions, speed_box = {}, nil
 local remaining, milliseconds = false, false
 local thumbnail, thumb_request = {}, nil
 local request, render
+local interval, font, published_margin = 1 / 60, "sans-serif", nil
 local white, accent, handle = "FFFFFF", "3282FF", "0865C9"
 local paths = {
     trim = "m 2 5 b 2 1 8 1 8 5 b 8 9 2 9 2 5 m 4 5 b 4 6.5 6 6.5 6 5 b 6 3.5 4 3.5 4 5 m 2 19 b 2 15 8 15 8 19 b 8 23 2 23 2 19 m 4 19 b 4 20.5 6 20.5 6 19 b 6 17.5 4 17.5 4 19 m 6 7 l 8 6 22 21 19 21 m 6 17 l 8 18 22 3 19 3",
@@ -102,10 +103,11 @@ local function layout()
             left = left + width + 12
         end
     end
-    if not fields then add_region("time", 25, row - 12, #(clock(position) .. clock(duration)) * 9 + 24, 24) end
+    if not fields then add_region("time", 25, row - 12, #(clock(duration, true) .. clock(duration, true)) * 9 + 24, 24) end
     local speed_left, speed_right = 25 + reserve + 20, x + 12
-    local width = math.min(280, speed_right - speed_left)
-    speed_box = width >= 160 and add_region("speed", clamp(W / 2 - width / 2, speed_left, speed_right - width), row - 22, width, 44) or nil
+    local height = 32 * 1.3
+    local width = math.min(height * 3.5, speed_right - speed_left)
+    speed_box = width >= height * 2 and add_region("speed", clamp(W / 2 - width / 2, speed_left, speed_right - width), row - height / 2, width, height) or nil
     add_region("title", 25, H - (chapter >= 0 and 126 or 106), math.max(0, W - 50), 30)
     if chapter >= 0 then add_region("chapter", 25, H - 96, math.max(0, W - 50), 22) end
     mp.set_mouse_area(0, H - bar_height(), W, H, "splice-input")
@@ -120,9 +122,9 @@ local function x_at(value) return 22 + clamp(value / math.max(duration, 0.001), 
 local function seek(value, exact)
     mp.commandv("seek", value, exact and "absolute+exact" or "absolute+keyframes")
 end
-local function update_drag()
+local function update_drag(x)
     if not drag then return end
-    local x = mouse()
+    x = x or mouse()
     if drag.kind == "speed" then
         drag.value = clamp(drag.speed - (x - drag.x) / drag.spacing * 0.1, 0.01, 100)
         local value = math.max(0.01, math.floor(drag.value * 10 + 0.5) / 10)
@@ -138,11 +140,11 @@ local function update_drag()
         edits.range[drag.kind] = value
         action("range-" .. drag.kind, value)
     end
-    if value ~= drag.value then drag.value = value seek(value, false) end
+    if value ~= drag.value then drag.value, preview_seek = value, value end
 end
 local function stop_drag(finalize)
     local held = drag
-    drag = nil
+    drag, preview_seek = nil, nil
     if held and (held.kind == "seek" or held.kind == "a" or held.kind == "b") then
         if finalize then
             pending_seek = {value = held.value, time = mp.get_time()}
@@ -220,9 +222,7 @@ local tick = mp.add_timeout(0, function() render() end)
 tick:kill()
 request = function()
     if tick:is_enabled() then return end
-    local fps = mp.get_property_number("display-fps", 60)
-    fps = fps > 0 and clamp(fps, 30, 240) or 60
-    tick.timeout = math.max(0, 1 / fps - (mp.get_time() - last_frame))
+    tick.timeout = math.max(0, interval - (mp.get_time() - last_frame))
     tick:resume()
 end
 render = function()
@@ -234,12 +234,13 @@ render = function()
     if opacity ~= target then request() end
     input(target > 0)
     local margin = target > 0 and bar_height() / math.max(H, 1) or 0
-    local previous = mp.get_property_native("user-data/osc/margins")
-    if not previous or previous.b ~= margin then mp.set_property_native("user-data/osc/margins", {l = 0, r = 0, t = 0, b = margin}) end
+    if published_margin ~= margin then
+        published_margin = margin
+        mp.set_property_native("user-data/osc/margins", {l = 0, r = 0, t = 0, b = margin})
+    end
     if opacity <= 0 then overlay.data = "" overlay:remove() clear_thumbnail() return end
-    layout()
-    update_drag()
     local mx, my = mouse()
+    update_drag(mx)
     hover = inside and target_at(mx, my) or nil
     local over_speed = speed_box and (hit(speed_box, mx, my) or drag and drag.kind == "speed")
     local ruler_target = over_speed and 1 or 0
@@ -263,7 +264,7 @@ render = function()
     end
     local function text(value, x, y, size, color, align, alpha, clip)
         event(color, alpha, x, y, align or 4)
-        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1\\3c&H000000&}", mp.get_property("osd-font", "sans-serif"), size))
+        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1\\3c&H000000&}", font, size))
         if clip then ass:append(string.format("{\\clip(25,0,%d,%d)}", W - 25, H)) end
         ass:append(mp.command_native({"escape-ass", tostring(value)}))
     end
@@ -330,30 +331,39 @@ render = function()
         local b, amount = speed_box, ruler * ruler * (3 - 2 * ruler)
         local cx = b.x + b.w / 2
         local spacing = b.w / 11
+        local size = math.floor(b.h * 0.48 + 0.5)
+        local label_height = math.floor(size * 1.1 + 0.5)
         if amount > 0 then
-            box(b.x, b.y, b.w, b.h, "111111", 0.7 * amount, 4)
+            box(b.x, b.y, b.w, b.h, "000000", 0.6 * amount, 4)
             local current = drag and drag.kind == "speed" and drag.value or speed
             local nearest = math.floor(current * 10 + 0.5)
             local guide = math.floor(b.h / 7.5)
-            local bottom, top = b.y + b.h - guide, b.y + 23
+            local bottom = b.y + b.h - guide
+            local top = b.y + label_height
             for i = -5, 5 do
                 local notch = nearest + i
                 local x = cx + (notch - current * 10) * spacing
                 if notch >= 0 and notch <= 1000 then
                     local y = top + (bottom - top) * (notch % 10 == 0 and 0 or notch % 5 == 0 and 0.2 or 0.4)
                     local width = notch % 10 == 0 and 3 or 2
-                    box(x - width / 2, y, width, bottom - y, white,
-                        math.min(1, 1.2 - math.abs(x - cx) / (b.w / 2)) * amount)
+                    event(white, math.min(1, 1.2 - math.abs(x - cx) / (b.w / 2)) * amount)
+                    ass:append("{\\bord1\\3c&H000000&}")
+                    ass:draw_start()
+                    ass:rect_cw(x - width / 2, y, x + width / 2, bottom)
+                    ass:draw_stop()
                 end
             end
             event(white, amount)
+            ass:append("{\\bord1\\3c&H000000&}")
             ass:draw_start()
             ass:move_to(cx, b.y + b.h - 2 - guide)
             ass:line_to(cx + guide, b.y + b.h - 2)
             ass:line_to(cx - guide, b.y + b.h - 2)
             ass:draw_stop()
         end
-        text(string.format("%g×", speed), cx, H - 44 - 10 * amount, 17 + 2 * amount, white, 5)
+        local offset = (label_height - b.h) / 2
+        event(white, 1, cx, H - 44 + offset * amount, 5)
+        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, 17 + (size - 17) * amount, math.floor(speed * 100 + 0.5) / 100))
     end
     if hover and hover.id == "seek" then
         local value = time_at(mx)
@@ -392,6 +402,8 @@ render = function()
     end
     overlay.res_x, overlay.res_y = W, H
     if overlay.data ~= ass.text then overlay.data = ass.text overlay:update() end
+    -- Publish the current pointer position before a preview seek can present a video frame.
+    if preview_seek then local value = preview_seek preview_seek = nil seek(value, false) end
 end
 
 ui.update = function(value)
@@ -437,9 +449,11 @@ observe("chapter", function(value) chapter = value or -1 layout() end)
 observe("chapter-list", function(value)
     chapters = value or {}
     table.sort(chapters, function(a, b) return a.time < b.time end)
+    layout()
 end)
 observe("osd-dimensions", function() layout() end)
-observe("display-fps", function() end)
+observe("display-fps", function(value) interval = 1 / (value and value > 0 and clamp(value, 30, 240) or 60) end)
+observe("osd-font", function(value) font = value or "sans-serif" end)
 observe("seeking", function(value) if value == false then pending_seek = nil end end)
 observe("user-data/mpv/console/open", function(value) console = value == true end)
 mp.observe_property("pause", "bool", function(_, paused) if paused then show() end end)
