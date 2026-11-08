@@ -26,8 +26,10 @@ local paths = {
     downloading = "m 4 3 l 12 11 20 3 22 5 14 13 22 21 20 23 12 15 4 23 2 21 10 13 2 5",
 }
 
+local function send(command) mp.command_native_async(command, function() end) end
 local function clamp(value, low, high) return math.max(low, math.min(high, value)) end
-local function mouse() return mp.get_mouse_pos() end
+local pointer = {x = 0, y = 0}
+local function mouse() return pointer.x, pointer.y end
 local function hit(box, x, y)
     return box and x >= box.x and x <= box.x + box.w and y >= box.y and y <= box.y + box.h
 end
@@ -44,7 +46,7 @@ local function action(id, value)
     if ui.action and edits.enabled ~= false then ui.action(id, value) end
 end
 local function clear_thumbnail()
-    if thumb_request then mp.commandv("script-message-to", "thumbfast", "clear") end
+    if thumb_request then send({"script-message-to", "thumbfast", "clear"}) end
     thumb_request = nil
 end
 local function bar_height() return chapter >= 0 and chapters[chapter + 1] and 130 or 108 end
@@ -120,7 +122,7 @@ local function time_at(x)
 end
 local function x_at(value) return 22 + clamp(value / math.max(duration, 0.001), 0, 1) * (W - 44) end
 local function seek(value, exact)
-    mp.commandv("seek", value, exact and "absolute+exact" or "absolute+keyframes")
+    send({"seek", value, exact and "absolute+exact" or "absolute+keyframes"})
 end
 local function update_drag(x)
     if not drag then return end
@@ -156,6 +158,7 @@ local function stop_drag(finalize)
 end
 local function release()
     if not drag then return end
+    pointer.x, pointer.y = mp.get_mouse_pos()
     update_drag()
     local held = stop_drag(true)
     if held.kind == "a" or held.kind == "b" then action("range-end")
@@ -173,6 +176,7 @@ local function release()
     request()
 end
 local function press()
+    pointer.x, pointer.y = mp.get_mouse_pos()
     local x, y = mouse()
     local box = target_at(x, y)
     if not box then return end
@@ -266,7 +270,7 @@ render = function()
         event(color, alpha, x, y, align or 4)
         ass:append(string.format("{\\fn%s\\fs%.2f\\bord1\\3c&H000000&}", font, size))
         if clip then ass:append(string.format("{\\clip(25,0,%d,%d)}", W - 25, H)) end
-        ass:append(mp.command_native({"escape-ass", tostring(value)}))
+        ass:append((tostring(value):gsub("\\", "\\\226\129\160"):gsub("{", "\\{"):gsub("\n", "\\N"):gsub("^ ", "\\h"):gsub("\\N ", "\\N\\h")))
     end
     local function icon(name, x, y, color)
         if name == "menu" then
@@ -377,7 +381,7 @@ render = function()
             local x, y = math.floor(tx - width / 2), math.floor(top - height)
             box(x - 5, y - 5, width + 10, height + 10, "111111", 1, 4)
             if not thumb_request or math.abs(thumb_request.time - value) > 0.02 or thumb_request.x ~= x or thumb_request.y ~= y then
-                mp.commandv("script-message-to", "thumbfast", "thumb", value, x, y)
+                send({"script-message-to", "thumbfast", "thumb", tostring(value), tostring(x), tostring(y)})
                 thumb_request = {time = value, x = x, y = y}
             end
             top = y - 10
@@ -401,7 +405,8 @@ render = function()
         end
     end
     overlay.res_x, overlay.res_y = W, H
-    if overlay.data ~= ass.text then overlay.data = ass.text overlay:update() end
+    if overlay.data ~= ass.text then overlay.data = ass.text
+        send({name = "osd-overlay", id = overlay.id, format = overlay.format, data = ass.text, res_x = W, res_y = H, z = overlay.z}) end
     -- Publish the current pointer position before a preview seek can present a video frame.
     if preview_seek then local value = preview_seek preview_seek = nil seek(value, false) end
 end
@@ -421,16 +426,15 @@ mp.set_key_bindings({
     {"WHEEL_DOWN", function() wheel(-1) end},
 }, "splice-input", "force")
 mp.disable_key_bindings("splice-input")
-mp.set_key_bindings({
-    {"mouse_move", function()
-        inside = true
-        local _, y = mouse()
-        if y >= H - bar_height() then show() elseif visibility == "auto" and not drag then shown = false end
-        request()
-    end},
-    {"mouse_leave", function() inside = false release() shown = false request() end},
-}, "splice-showhide", "force")
-mp.enable_key_bindings("splice-showhide", "allow-vo-dragging+allow-hide-cursor")
+mp.observe_property("mouse-pos", "native", function(_, value)
+    if not value then return end
+    pointer = value
+    inside = value.hover
+    if inside then
+        if value.y >= H - bar_height() then show() elseif visibility == "auto" and not drag then shown = false end
+    else release() shown = false end
+    request()
+end)
 mp.register_script_message("osc-visibility", set_visibility)
 mp.register_script_message("osc-show", show)
 mp.register_script_message("osc-hide", function() shown = false request() end)
