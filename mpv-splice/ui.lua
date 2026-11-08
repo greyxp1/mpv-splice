@@ -113,8 +113,8 @@ local function layout()
     local speed_left, speed_right = 25 + reserve + 20, x + 12
     local height = 32 * 1.3
     local width = math.min(height * 3.5, speed_right - speed_left)
-    speed_box = width >= height * 2 and {x = clamp(W / 2 - width / 2, speed_left, speed_right - width), y = row - height / 2 - 14, w = width, h = height} or nil
-    if speed_box then add_region("speed", speed_box.x, speed_box.y, width, height + 14) end
+    speed_box = width >= height * 2 and {x = clamp(W / 2 - width / 2, speed_left, speed_right - width), y = row - height / 2 - 8, w = width, h = height} or nil
+    if speed_box then add_region("speed", speed_box.x, speed_box.y, width, height + 8) end
     add_region("title", 25, 20, math.max(0, W - 50), 30)
     if chapter >= 0 then add_region("chapter", 25, 52, math.max(0, W - 50), 22) end
     mp.set_mouse_area(0, H - bar_height, W, H, "splice-input")
@@ -286,12 +286,6 @@ render = function()
             ass:append("{\\p1}" .. paths[name] .. "{\\p0}")
         end
     end
-    -- A short gradient avoids the large blurred shapes inherited from ModernZ.
-    for i = 0, 31 do
-        local top = H - bar_height + math.floor(i * bar_height / 32)
-        local bottom = H - bar_height + math.floor((i + 1) * bar_height / 32)
-        box(0, top, W, bottom - top, "000000", i / 31 * 0.7)
-    end
     local function bar(left, right, color, alpha)
         local start = left
         for _, entry in ipairs(chapters) do
@@ -329,7 +323,6 @@ render = function()
         local color = region.control and region.control.active and accent or white
         local hovered = hover == region
         if region.control and not region.control.range or region.id == "menu" then
-            if hovered then box(region.x - 6, region.y - 6, region.w + 12, region.h + 12, accent, 0.1, 4) end
             icon(region.control and region.control.icon or "menu", region.x + region.w / 2, H - 44, hovered and accent or color)
         elseif region.control and region.control.range then
             text(control_text(region.control), region.x, H - 44, 16, hovered and accent or white)
@@ -344,7 +337,6 @@ render = function()
         local size = math.floor(b.h * 0.48 + 0.5)
         local label_height = math.floor(size * 1.1 + 0.5)
         local emphasis = 0.45 + 0.55 * amount
-        box(b.x, b.y, b.w, b.h, "000000", 0.6 * amount, 4)
         local current = drag and drag.kind == "speed" and drag.value or speed
         local nearest = math.floor(current * 10 + 0.5)
         local guide = math.floor(b.h / 7.5)
@@ -370,8 +362,10 @@ render = function()
         ass:line_to(cx + guide, b.y + b.h - 2)
         ass:line_to(cx - guide, b.y + b.h - 2)
         ass:draw_stop()
-        event(white, amount, cx, b.y + label_height / 2, 5)
-        ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, size, math.floor(speed * 100 + 0.5) / 100))
+        if amount > 0 then
+            event(white, amount, cx, b.y + label_height / 2, 5)
+            ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, size, math.floor(speed * 100 + 0.5) / 100))
+        end
     end
     if hover and hover.id == "seek" then
         local value = time_at(mx)
