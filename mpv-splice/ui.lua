@@ -113,7 +113,8 @@ local function layout()
     local speed_left, speed_right = 25 + reserve + 20, x + 12
     local height = 32 * 1.3
     local width = math.min(height * 3.5, speed_right - speed_left)
-    speed_box = width >= height * 2 and add_region("speed", clamp(W / 2 - width / 2, speed_left, speed_right - width), row - height / 2 - 14, width, height) or nil
+    speed_box = width >= height * 2 and {x = clamp(W / 2 - width / 2, speed_left, speed_right - width), y = row - height / 2 - 14, w = width, h = height} or nil
+    if speed_box then add_region("speed", speed_box.x, speed_box.y, width, height + 14) end
     add_region("title", 25, 20, math.max(0, W - 50), 30)
     if chapter >= 0 then add_region("chapter", 25, 52, math.max(0, W - 50), 22) end
     mp.set_mouse_area(0, H - bar_height, W, H, "splice-input")
@@ -251,7 +252,7 @@ render = function()
     local mx, my = mouse()
     update_drag(mx)
     hover = inside and target_at(mx, my) or nil
-    local over_speed = speed_box and (hit(speed_box, mx, my) or drag and drag.kind == "speed")
+    local over_speed = hover and hover.id == "speed" or drag and drag.kind == "speed"
     local ruler_target = over_speed and 1 or 0
     ruler = ruler_target > ruler and math.min(ruler_target, ruler + math.min(dt, 1 / 30) / 0.14)
         or math.max(ruler_target, ruler - math.min(dt, 1 / 30) / 0.14)
@@ -371,7 +372,7 @@ render = function()
             ass:draw_stop()
         end
         local offset = (label_height - b.h) / 2
-        event(white, 1, cx, b.y + b.h / 2 + offset * amount, 5)
+        event(white, 1, cx, H - 44 + (offset - 14) * amount, 5)
         ass:append(string.format("{\\fn%s\\fs%.2f\\bord1.2\\3c&H000000&}%gx", font, 17 + (size - 17) * amount, math.floor(speed * 100 + 0.5) / 100))
     end
     if hover and hover.id == "seek" then
